@@ -1,0 +1,19 @@
+{
+  "name": "codeverse",
+  "version": "1.0.0",
+  "description": "The Codeverse",
+  "main": "main.mjs",
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/j0code/codeverse.git"
+  },
+  "author": "j0code",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/j0code/codeverse/issues"
+  },
+  "homepage": "https://github.com/j0code/codeverse#readme"
+}
