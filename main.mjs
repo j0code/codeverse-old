@@ -12,7 +12,7 @@ const sql_options = {
 }
 
 var app = new WebApp(25560, sql_options, () => {}, (query, e1) => {
-  query("CREATE TABLE IF NOT EXISTS `accounts` (`id` INT AUTO_INCREMENT PRIMARY KEY, `username` VARCHAR(16) NOT NULL, `password` VARCHAR(256) NOT NULL, `email` VARCHAR(32), `birthdate` DATETIME NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `verified` BOOLEAN DEFAULT FALSE, `emailverified` BOOLEAN DEFAULT FALSE, `token` VARCHAR(256) NOT NULL UNIQUE)", (e, result) => {
+  query("CREATE TABLE IF NOT EXISTS `accounts` (`id` INT AUTO_INCREMENT PRIMARY KEY, `username` VARCHAR(16) NOT NULL, `password` VARCHAR(256) NOT NULL, `email` VARCHAR(32), `birthdate` DATETIME NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `verified` BOOLEAN DEFAULT FALSE, `emailverified` BOOLEAN DEFAULT FALSE)", (e, result) => {
     if(e) {console.log(e);return}
     console.log("Table created")
   })

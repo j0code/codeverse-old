@@ -17,6 +17,6 @@
   },
   "homepage": "https://github.com/j0code/codeverse#readme",
   "dependencies": {
-    "@j0code/webapp": "^0.1.1"
+    "@j0code/webapp": "^0.1.3"
   }
 }
