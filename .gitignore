@@ -1,0 +1,7 @@
+node_modules
+docs
+cert
+api
+run.bat
+.git
+.gitattributes

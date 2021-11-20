@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/j0code/codeverse/issues"
   },
-  "homepage": "https://github.com/j0code/codeverse#readme"
+  "homepage": "https://github.com/j0code/codeverse#readme",
+  "dependencies": {
+    "@j0code/webapp": "^0.1.1"
+  }
 }
