@@ -1,7 +1,10 @@
 import { WebApp } from "@j0code/webapp"
+import crypto from "crypto"
 
 const statusCodes = {
-  success: { httpCode: 200, status: { code: "success", description: "success" }}
+  success: { httpCode: 200, status: { code: "success", description: "success" }},
+  invalid: { httpCode: 500, status: { code: "invalid", description: "Invalid" }},
+  username_taken: { httpCode: 500, status: { code: "username_taken", description: "Username already taken" }},
 }
 
 const sql_options = {
@@ -19,11 +22,36 @@ var app = new WebApp(25560, sql_options, () => {}, (query, e1) => {
 })
 
 app.node("register", (data, res) => {
-  if(data.username && data.password) {
-    app.query(`INSERT INTO \`accounts\` (\`username\`, \`password\`, \`email\`, \`birthdate\`) VALUES ("${data.username}", "${data.password}", "${data.email}", "${data.birthdate}")`)
-    respond(res, statusCodes.success)
+  var check = checkRegister(data)
+  if(!check) {
+    // valid -> create acc
+    app.query(`SELECT * FROM accounts WHERE username = "${data.username}"`, (err, result, fields) => {
+      if(err) throw err
+      console.log(result) // debug log
+      if(result.length == 0) {
+        // hash password
+        var hash = crypto.createHash("sha256")
+        hash.update(data.password)
+        var pw_hash = hash.digest("hex")
+        console.log("HASH " + data.password + " -> " + pw_hash) // debug log
+        // put on db
+        app.query(`INSERT INTO \`accounts\` (\`username\`, \`password\`, \`email\`, \`birthdate\`) VALUES ("${data.username}", "${pw_hash}", "${data.email}", "${data.birthdate}")`, (err, result) => {
+          if(err) throw err
+          console.log(result) // debug log
+          console.log("Created account!") // debug log
+          respond(res, statusCodes.success, "")
+        })
+      } else {
+        // username already taken
+        respond(res, statusCodes.username_taken, "") // temp
+        console.log("uat")
+      }
+    })
+  } else {
+    // invalid
+    respond(res, statusCodes.invalid, check) // temp
+    console.log("inv")
   }
-  // respond with error!
 })
 
 app.node("profile", (data, res) => {
@@ -36,14 +64,42 @@ app.node("profile", (data, res) => {
 })
 
 function respond(res, status, data) {
-  if(!res || !status || !data || !["object","string"].includes(typeof data)) {
-    if(res) {
-      res.writeHead(500)
-      res.end('')// insert error
-    }
+  if(!res) return
+  if(!status || data == "undefined" || !["object","string"].includes(typeof data)) {
+    res.writeHead(500)
+    res.end('')// insert error
     return
   }
   if(typeof data == "object") data = JSON.stringify(data)
   var o = { status: status.status, data }
   res.writeHead(status.httpCode)
+  res.end(JSON.stringify(o))
+  console.log("o", o)
+}
+
+function checkRegister(data) {
+  if(data.password && data.username && data.email && data.birthdate) {
+		if(data.username.length >= 3) {
+			if(data.password.length >= 8) {
+				if(data.email != "" && /\S+@\S+\.\S+/.test(data.email)) {
+					var time = new Date();
+					var birthdate = null;
+					try {
+						birthdate = new Date(data.birthdate);
+					} catch(e) {
+						return "Invalid date";
+					}
+					var years = time.getUTCFullYear() - birthdate.getUTCFullYear();
+					if(years > 13) return;
+					else if(years == 13) {
+						if(birthdate.getUTCMonth() > time.getUTCMonth) return;
+						else if(birthdate.getUTCMonth() == time.getUTCMonth) {
+							if(birthdate.getUTCDate() >= time.getUTCDate) return;
+							else return "Too young (min: 13)";
+						} else return "Too young (min: 13)";
+					} else return "Too young (min: 13)";
+				} else return "Invalid email address";
+			} else return "Passwort too short (min: 8)";
+		} else return "Username too short (min: 3)";
+	} else return "Invalid or incomplete";
 }
