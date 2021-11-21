@@ -70,7 +70,6 @@ function respond(res, status, data) {
     res.end('')// insert error
     return
   }
-  if(typeof data == "object") data = JSON.stringify(data)
   var o = { status: status.status, data }
   res.writeHead(status.httpCode)
   res.end(JSON.stringify(o))
