@@ -1,5 +1,6 @@
 import { WebApp } from "@j0code/webapp"
 import crypto from "crypto"
+import uaparser from "ua-parser-js"
 
 const statusCodes = {
   success: { httpCode: 200, status: { code: "success", description: "success" }},
@@ -15,7 +16,11 @@ const sql_options = {
 }
 
 var app = new WebApp(25560, sql_options, () => {}, (query, e1) => {
-  query("CREATE TABLE IF NOT EXISTS `accounts` (`id` INT AUTO_INCREMENT PRIMARY KEY, `username` VARCHAR(16) NOT NULL, `password` VARCHAR(256) NOT NULL, `email` VARCHAR(32), `birthdate` DATETIME NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `verified` BOOLEAN DEFAULT FALSE, `emailverified` BOOLEAN DEFAULT FALSE)", (e, result) => {
+  query("CREATE TABLE IF NOT EXISTS `accounts` (`id` INT AUTO_INCREMENT PRIMARY KEY, `username` VARCHAR(16) UNIQUE NOT NULL, `password` VARCHAR(256) NOT NULL, `email` VARCHAR(32) NOT NULL, `birthdate` DATETIME NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `verified` BOOLEAN DEFAULT FALSE, `emailverified` BOOLEAN DEFAULT FALSE)", (e, result) => {
+    if(e) {console.log(e);return}
+    console.log("accounts table created")
+  })
+  query("CREATE TABLE IF NOT EXISTS `sessions` (`sessionid` INT AUTO_INCREMENT PRIMARY KEY, `id` INT, `username` VARCHAR(16) NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `expires` DATETIME NOT NULL, `address` VARCHAR(39) NOT NULL, `agent` JSON NOT NULL, `token` VARCHAR(64) NOT NULL)", (e, result) => {
     if(e) {console.log(e);return}
     console.log("Table created")
   })
@@ -55,7 +60,10 @@ app.node("register", (data, res) => {
 })
 
 app.node("profile", (data, res) => {
-  app.query("SELECT * FROM accounts WHERE id = 1", (e, result, fields) => {
+  // temporary
+  var q = "SELECT * FROM accounts WHERE id = 1"
+  if(data.username) q = "SELECT * FROM accounts WHERE username = \"" + data.username + "\""
+  app.query(q, (e, result, fields) => {
     if(e) throw e
     console.log(result)
     var acc = result[0]
