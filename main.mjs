@@ -131,6 +131,23 @@ app.node("login", (req, data, res) => {
   })
 })
 
+app.get("/profile/:username", (req, res) => {
+  res.sendFile("./docs/profile/index.html", {root: process.cwd()}, e => {
+    if(e) {
+      console.error(e)
+      if(e.code == "ENOTFOUND") {
+        res.writeHead(404)
+        res.end("404 Not Found")
+        return
+      }
+      res.writeHead(500)
+      res.end("500 Internal Server Error")
+    }
+  })
+})
+
+app.provideDocs()
+
 function respond(res, status, data) {
   if(!res) return
   if(data == undefined) data = {}
