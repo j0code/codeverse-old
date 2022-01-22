@@ -2,12 +2,18 @@ import WebApp from "../webapp/main.mjs" // @j0code/webapp
 import crypto from "crypto"
 import UAParser from "ua-parser-js"
 
+const port = 25560
+const host = `cohalejoja.selfhost.eu:${port}`
+const base_url = `https://${host}`
+
 const statusCodes = {
-  success: { httpCode: 200, status: { code: "success", description: "success" }},
+  success: { httpCode: 200, status: { code: "success", description: "Success" }},
   invalid: { httpCode: 500, status: { code: "invalid", description: "Invalid" }},
   username_taken: { httpCode: 500, status: { code: "username_taken", description: "Username already taken" }},
   user_unknown: { httpCode: 500, status: { code: "user_unknown", description: "Wrong username or password" }},
-  server_error: { httpCode: 500, status: { code: "server_error", description: "general error" }}
+  server_error: { httpCode: 500, status: { code: "server_error", description: "General error" }},
+  no_session: { httpCode: 401, status: { code: "no_session", description: "No session" }},
+  session_expired: { httpCode: 401, status: { code: "session_expired", description: "Session expired, or unknown" }}
 }
 
 const sql_options = {
@@ -17,7 +23,7 @@ const sql_options = {
   database: "codeverse"
 }
 
-var app = new WebApp(25560, sql_options, () => {}, (query, e1) => {
+var app = new WebApp(port, sql_options, () => {}, (query, e1) => {
   query("CREATE TABLE IF NOT EXISTS `accounts` (`id` INT AUTO_INCREMENT PRIMARY KEY, `username` VARCHAR(16) UNIQUE NOT NULL, `password` VARCHAR(256) NOT NULL, `email` VARCHAR(32) NOT NULL, `birthdate` DATETIME NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `verified` BOOLEAN DEFAULT FALSE, `emailverified` BOOLEAN DEFAULT FALSE)", (e, result) => {
     if(e) {console.log(e);return}
     console.log("accounts table created")
@@ -54,29 +60,40 @@ app.node("register", (req, data, res) => {
     })
   } else {
     // invalid
-    respond(res, statusCodes.invalid, check) // temp
+    respond(res, statusCodes.invalid, {details: check}) // temp
     console.log("inv")
   }
 })
 
 app.node("profile", (req, data, res) => {
-  var cookies = parseCookie(req.get("cookie"))
-  if(!cookies.session) return console.log("FRET! no token")
-  console.log("token", cookies.session)
-  // temporary
-  var q = "SELECT * FROM accounts WHERE id = 1"
-  if(data.username) q = "SELECT * FROM accounts WHERE username = \"" + data.username + "\""
-  app.query(q, (e, result, fields) => {
-    if(e) throw e
-    console.log(result)
-    var acc = result[0]
-    respond(res, statusCodes.success, {username: acc.username, email: acc.email, creation: acc.creation, birthdate: acc.birthdate})
+  auth(req, res, session => {
+    if(data.username) { // get other user's profile
+      getAccount("username", data.username, acc => {
+        var o = {username: acc.username, creation: acc.creation}
+        if(acc.id == session.id) { // account is self
+          o.email = acc.email
+          o.birthdate = acc.birthdate
+        }
+        respond(res, statusCodes.success, o)
+      })
+    } else { // get own profile
+      getAccount("id", session.id, acc => {
+        respond(res, statusCodes.success, {username: acc.username, email: acc.email, creation: acc.creation, birthdate: acc.birthdate})
+      })
+    }
   })
 })
 
 app.node("sessions", (req, data, res) => {
-  var cookie = req.get("cookie")
-
+  auth(req, res, session => {
+    getSessions("id", session.id, sessions => {
+      var a = []
+      for(var s of sessions) {
+        a.push({address: s.address, agent: JSON.parse(s.agent), creation: s.creation, expires: s.expires})
+      }
+      respond(res, statusCodes.success, a)
+    })
+  })
 })
 
 app.node("login", (req, data, res) => {
@@ -116,15 +133,81 @@ app.node("login", (req, data, res) => {
 
 function respond(res, status, data) {
   if(!res) return
-  if(!status || data == "undefined" || !["object","string"].includes(typeof data)) {
+  if(data == undefined) data = {}
+  if(!status || typeof data != "object") {
     res.writeHead(500)
-    res.end('')// insert error
+    res.end(JSON.stringify({status: (status || statusCodes.server_error).status, data: {}}))
     return
   }
+  data = data || {}
   var o = { status: status.status, data }
   res.writeHead(status.httpCode)
   res.end(JSON.stringify(o))
   console.log("o", o)
+}
+
+function auth(req, res, onauth, onerr) {
+  // check session cookie
+  if(req.get("cookie")) var cookies = parseCookie(req.get("cookie"))
+  if(!req.get("cookie") || !cookies.session) {
+    return respond(res, statusCodes.no_session)
+  }
+  // find session
+  app.query(`SELECT * FROM sessions WHERE token = "${cookies.session}"`, (e, result, fields) => {
+    if(e) throw e
+    console.log(result)
+    if(result.length == 0) {
+      res.setHeader("Location", base_url + "/login")
+      respond(statusCodes.session_expired)
+      if(onerr) onerr()
+      else console.error("auth ERROR: session_expired")
+      return
+    }
+    if(onauth) onauth(result[0])
+  })
+}
+
+function getAccount(row, check, callback, onerr) {
+  app.query(`SELECT * FROM accounts WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+    if(e) {
+      if(onerr) onerr(e)
+      else console.error("getAccount Error:", e)
+      return
+    }
+    if(result.length == 0) {
+      if(onerr) onerr()
+      else console.error("getAccount ERROR: no result")
+      return
+    }
+    if(callback) callback(result[0])
+  })
+}
+
+function getSession(row, check, callback, onerr) {
+  app.query(`SELECT * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+    if(e) {
+      if(onerr) onerr(e)
+      else console.error("getSession Error:", e)
+      return
+    }
+    if(result.length == 0) {
+      if(onerr) onerr()
+      else console.error("getSession ERROR: no result")
+      return
+    }
+    if(callback) callback(result[0])
+  })
+}
+
+function getSessions(row, check, callback, onerr) {
+  app.query(`SELECT * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+    if(e) {
+      if(onerr) onerr(e)
+      else console.error("getSession Error:", e)
+      return
+    }
+    if(callback) callback(result)
+  })
 }
 
 function checkRegister(data) {
