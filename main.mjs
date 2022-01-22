@@ -13,7 +13,8 @@ const statusCodes = {
   user_unknown: { httpCode: 500, status: { code: "user_unknown", description: "Wrong username or password" }},
   server_error: { httpCode: 500, status: { code: "server_error", description: "General error" }},
   no_session: { httpCode: 401, status: { code: "no_session", description: "No session" }},
-  session_expired: { httpCode: 401, status: { code: "session_expired", description: "Session expired, or unknown" }}
+  session_expired: { httpCode: 401, status: { code: "session_expired", description: "Session expired, or unknown" }},
+  wrong_syntax: { httpCode: 401, status: { code: "wrong_syntax", description: "Wrong syntax, e.g. required value missing" }}
 }
 
 const sql_options = {
@@ -97,38 +98,37 @@ app.node("sessions", (req, data, res) => {
 })
 
 app.node("login", (req, data, res) => {
-  if(data.password && data.username) {
-    app.query(`SELECT * FROM accounts WHERE username = '${data.username}'`, (e, result, fields) => {
+  if(!data.password || !data.username) return respond(res, statusCodes.wrong_syntax)
+  app.query(`SELECT * FROM accounts WHERE username = '${data.username}'`, (e, result, fields) => {
+    if(e) throw e
+    console.log(result)
+    if(result.length != 1) return respond(res, statusCodes.user_unknown)
+    var acc = result[0]
+    // check pw hash
+    var pw_hash = hash256(data.password)
+    console.log("HASH " + data.password + " -> " + pw_hash)
+    if(acc.password != pw_hash) return respond(res, statusCodes.user_unknown)
+    // create session
+    var uagent = UAParser(req.get("user-agent"))
+    console.log(`User Agent: ${uagent.browser.name}/${uagent.browser.major} on ${uagent.os.name}`)
+    var token = hash256(Math.random()+"") // random hash
+    // check exists
+    app.query(`SELECT * FROM sessions WHERE token = "${token}"`, (e, result, fields) => {
       if(e) throw e
       console.log(result)
-      if(result.length != 1) return respond(statusCodes.user_unknown)
-      var acc = result[0]
-      // check pw hash
-      var pw_hash = hash256(data.password)
-      console.log("HASH " + data.password + " -> " + pw_hash)
-      if(acc.password != pw_hash) return respond(statusCodes.user_unknown)
-      // create session
-      var uagent = UAParser(req.get("user-agent"))
-      console.log(`User Agent: ${uagent.browser.name}/${uagent.browser.major} on ${uagent.os.name}`)
-      var token = hash256(Math.random()+"") // random hash
-      // check exists
-      app.query(`SELECT * FROM sessions WHERE token = "${token}"`, (e, result, fields) => {
+      if(result.length != 0) return respond(res, statusCodes.server_error, "Generated session token already exists. Please try again.")
+      // insert session into table
+      var date = new Date(Date.now() + (1000*60*60*24)) // expires in 1 day
+      var sqldate = date.toISOString().slice(0, 19).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
+      app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify({raw: req.get("user-agent"), parsed: uagent}).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
         if(e) throw e
-        console.log(result)
-        if(result.length != 0) return respond(statusCodes.server_error, "Generated session token already exists. Please try again.")
-        // insert session into table
-        var date = new Date()
-        var sqldate = date.toISOString().slice(0, 19).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
-        app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify(uagent).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
-          if(e) throw e
-          console.log(result) // debug log
-          console.log("Created session!") // debug log
-          res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
-          respond(res, statusCodes.success, "")
-        })
+        console.log(result) // debug log
+        console.log("Created session!") // debug log
+        res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
+        respond(res, statusCodes.success, "")
       })
     })
-  }
+  })
 })
 
 function respond(res, status, data) {
@@ -146,11 +146,14 @@ function respond(res, status, data) {
   console.log("o", o)
 }
 
-function auth(req, res, onauth, onerr) {
+function auth(req, res, callback, onerr) {
   // check session cookie
   if(req.get("cookie")) var cookies = parseCookie(req.get("cookie"))
   if(!req.get("cookie") || !cookies.session) {
-    return respond(res, statusCodes.no_session)
+    respond(res, statusCodes.no_session)
+    if(onerr) onerr("no_token")
+    else console.error("auth ERROR: no_session (no_token)")
+    return
   }
   // find session
   app.query(`SELECT * FROM sessions WHERE token = "${cookies.session}"`, (e, result, fields) => {
@@ -158,12 +161,30 @@ function auth(req, res, onauth, onerr) {
     console.log(result)
     if(result.length == 0) {
       res.setHeader("Location", base_url + "/login")
-      respond(statusCodes.session_expired)
-      if(onerr) onerr()
-      else console.error("auth ERROR: session_expired")
+      respond(res, statusCodes.no_session)
+      if(onerr) onerr("unknown_session")
+      else console.error("auth ERROR: no_session (unknown_session)")
       return
     }
-    if(onauth) onauth(result[0])
+    var session = result[0]
+    // match session
+    var raw_agent = JSON.parse(session.agent).raw
+    if(session.address != req.ip || raw_agent != req.get("user-agent")) {
+      respond(res, statusCodes.no_session)
+      if(onerr) onerr("session_mismatch")
+      else console.error("auth ERROR: no_session (session_mismatch)")
+      return
+    }
+    if(session.expires.getTime() < Date.now()) { // session expired
+      respond(res, statusCodes.session_expired)
+      app.query(`DELETE FROM sessions WHERE token = "${cookies.session}"`, (e, result, fields) => { // delete session
+        if(e) throw e
+      })
+      if(onerr) onerr("session_expired")
+      else console.error("auth ERROR: no_session (session_expired)")
+      return
+    }
+    if(callback) callback(result[0])
   })
 }
 
