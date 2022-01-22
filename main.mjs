@@ -76,6 +76,9 @@ app.node("profile", (req, data, res) => {
           o.birthdate = acc.birthdate
         }
         respond(res, statusCodes.success, o)
+      }, e => {
+        if(e) throw e
+        respond(res, statusCodes.user_unknown)
       })
     } else { // get own profile
       getAccount("id", session.id, acc => {
@@ -209,15 +212,22 @@ function getAccount(row, check, callback, onerr) {
   app.query(`SELECT * FROM accounts WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
     if(e) {
       if(onerr) onerr(e)
-      else console.error("getAccount Error:", e)
+      else {
+        console.error("getAccount Error:", e)
+        respond(res, statusCodes.server_error)
+      }
       return
     }
     if(result.length == 0) {
       if(onerr) onerr()
-      else console.error("getAccount ERROR: no result")
+      else {
+        console.error("getAccount ERROR: no result")
+        respond(res, statusCodes.user_unknown)
+      }
       return
     }
     if(callback) callback(result[0])
+    else respond(res, statusCodes.server_error)
   })
 }
 
@@ -225,15 +235,22 @@ function getSession(row, check, callback, onerr) {
   app.query(`SELECT * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
     if(e) {
       if(onerr) onerr(e)
-      else console.error("getSession Error:", e)
+      else {
+        console.error("getSession Error:", e)
+        respond(res, statusCodes.server_error)
+      }
       return
     }
     if(result.length == 0) {
       if(onerr) onerr()
-      else console.error("getSession ERROR: no result")
+      else {
+        console.error("getSession ERROR: no result")
+        respond(res, statusCodes.no_session)
+      }
       return
     }
     if(callback) callback(result[0])
+    else respond(res, statusCodes.server_error)
   })
 }
 
@@ -241,10 +258,14 @@ function getSessions(row, check, callback, onerr) {
   app.query(`SELECT * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
     if(e) {
       if(onerr) onerr(e)
-      else console.error("getSession Error:", e)
+      else {
+        console.error("getSession Error:", e)
+        respond(res, statusCodes.server_error)
+      }
       return
     }
     if(callback) callback(result)
+    else respond(res, statusCodes.server_error)
   })
 }
 
