@@ -49,12 +49,16 @@ app.node("register", (req, data, res) => {
         // hash password
         var pw_hash = hash256(data.password)
         console.log("HASH " + data.password + " -> " + pw_hash) // debug log
+        // covert date
+        var sqldate = new Date(data.birthdate).toISOString().slice(0, -1).replace('T', ' ')
         // put on db
-        app.query(`INSERT INTO \`accounts\` (\`username\`, \`password\`, \`email\`, \`birthdate\`) VALUES ("${data.username}", "${pw_hash}", "${data.email}", "${data.birthdate}")`, (err, result) => {
+        app.query(`INSERT INTO \`accounts\` (\`username\`, \`password\`, \`email\`, \`birthdate\`) VALUES ("${data.username}", "${pw_hash}", "${data.email}", "${sqldate}")`, (err, result) => {
           if(err) throw err
           console.log(result) // debug log
           console.log("Created account!") // debug log
-          respond(res, statusCodes.success, "")
+          getAccount("username", data.username, acc => {
+            createSession(acc, req, res)
+          })
         })
       } else {
         // username already taken
@@ -133,35 +137,15 @@ app.node("sessions", (req, data, res) => {
 
 app.node("login", (req, data, res) => {
   if(!data.password || !data.username) return respond(res, statusCodes.wrong_syntax)
-  app.query(`SELECT * FROM accounts WHERE username = '${data.username}'`, (e, result, fields) => {
-    if(e) throw e
-    console.log(result)
-    if(result.length != 1) return respond(res, statusCodes.user_unknown)
-    var acc = result[0]
+  getAccount("username", data.username, acc => {
     // check pw hash
     var pw_hash = hash256(data.password)
     console.log("HASH " + data.password + " -> " + pw_hash)
     if(acc.password != pw_hash) return respond(res, statusCodes.user_unknown)
-    // create session
-    var uagent = UAParser(req.get("user-agent"))
-    console.log(`User Agent: ${uagent.browser.name}/${uagent.browser.major} on ${uagent.os.name}`)
-    var token = hash256(Math.random()+"") // random hash
-    // check exists
-    app.query(`SELECT * FROM sessions WHERE token = "${token}"`, (e, result, fields) => {
-      if(e) throw e
-      console.log(result)
-      if(result.length != 0) return respond(res, statusCodes.server_error, "Generated session token already exists. Please try again.")
-      // insert session into table
-      var date = new Date(Date.now() + (1000*60*60*24)) // expires in 1 day
-      var sqldate = date.toISOString().slice(0, 19).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
-      app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify({raw: req.get("user-agent"), parsed: uagent}).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
-        if(e) throw e
-        console.log(result) // debug log
-        console.log("Created session!") // debug log
-        res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
-        respond(res, statusCodes.success, "")
-      })
-    })
+    createSession(acc, req, res)
+  }, e => {
+    if(e == "no_result") respond(res, statusCodes.user_unknown)
+    else console.error("login Error:", e)
   })
 })
 
@@ -214,7 +198,7 @@ function sendFile(path, res, headers) {
 function sendComposedFile(res, path) {
   fs.readFile(process.cwd() + "/docs/head.html", {encoding: "utf8"}).then(head => {
     fs.readFile(process.cwd() + "/docs" + path + "/index.html", {encoding: "utf8"}).then(body => {
-      res.send(`<!doctype html>\n<html>\n<head>\n${head}</head>\n<body>\n${body}</body></html>`)
+      res.send(`${head}\n<body>\n${body}</body></html>`)
     })
   })
 }
@@ -304,7 +288,7 @@ function getSession(row, check, callback, onerr) {
       return
     }
     if(result.length == 0) {
-      if(onerr) onerr()
+      if(onerr) onerr("no_result")
       else {
         console.error("getSession ERROR: no result")
       }
@@ -337,6 +321,29 @@ function deleteSessions(row, check, callback, onerr) {
       return
     }
     if(callback) callback(result)
+  })
+}
+
+function createSession(acc, req, res) {
+  // create session
+  var uagent = UAParser(req.get("user-agent"))
+  console.log(`User Agent: ${uagent.browser.name}/${uagent.browser.major} on ${uagent.os.name}`)
+  var token = hash256(Math.random()+"") // random hash
+  // check exists
+  app.query(`SELECT * FROM sessions WHERE token = "${token}"`, (e, result, fields) => {
+    if(e) throw e
+    console.log(result)
+    if(result.length != 0) return respond(res, statusCodes.server_error, "Generated session token already exists. Please try again.")
+    // insert session into table
+    var date = new Date(Date.now() + (1000*60*60*24)) // expires in 1 day
+    var sqldate = date.toISOString().slice(0, -1).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
+    app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify({raw: req.get("user-agent"), parsed: uagent}).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
+      if(e) throw e
+      console.log(result) // debug log
+      console.log("Created session!") // debug log
+      res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
+      respond(res, statusCodes.success, "")
+    })
   })
 }
 
