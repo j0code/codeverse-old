@@ -134,8 +134,29 @@ app.node("login", (req, data, res) => {
   })
 })
 
-app.get("/profile/:username", (req, res) => {
-  res.sendFile("./docs/profile/index.html", {root: process.cwd()}, e => {
+app.node("logout", (req, data, res) => {
+  res.cookie("session", "", {path: "/", httpOnly: true, secure: true, maxAge: 0}) // delete cookie
+  res.end() // no response
+  // delete session
+  if(!req.get("cookie")) return
+  if(req.get("cookie")) var cookies = parseCookie(req.get("cookie"))
+  if(!cookies.session) return
+  deleteSessions("token", cookies.session, () => {}, e => {
+    if(e) console.error("logout Error: ", e)
+  }) // delete session
+})
+
+app.get(["/js/*", "/api.mjs", "/cookie.mjs", "/favicon.ico"], (req, res) => {
+  res.type("application/javascript")
+  sendFile("." + req.url, res)
+})
+
+app.get("*", (req, res) => {
+  sendFile("./index.html", res)
+})
+
+function sendFile(path, res, headers) {
+  res.sendFile(path, {root: process.cwd() + "/docs/", headers}, e => {
     if(e) {
       console.error(e)
       if(e.code == "ENOTFOUND") {
@@ -147,9 +168,7 @@ app.get("/profile/:username", (req, res) => {
       res.end("500 Internal Server Error")
     }
   })
-})
-
-app.provideDocs()
+}
 
 function respond(res, status, data) {
   if(!res) return
@@ -197,9 +216,7 @@ function auth(req, res, callback, onerr) {
     }
     if(session.expires.getTime() < Date.now()) { // session expired
       respond(res, statusCodes.session_expired)
-      app.query(`DELETE FROM sessions WHERE token = "${cookies.session}"`, (e, result, fields) => { // delete session
-        if(e) throw e
-      })
+      deleteSessions("token", cookies.session) // delete session
       if(onerr) onerr("session_expired")
       else console.error("auth ERROR: no_session (session_expired)")
       return
@@ -214,7 +231,6 @@ function getAccount(row, check, callback, onerr) {
       if(onerr) onerr(e)
       else {
         console.error("getAccount Error:", e)
-        respond(res, statusCodes.server_error)
       }
       return
     }
@@ -222,12 +238,10 @@ function getAccount(row, check, callback, onerr) {
       if(onerr) onerr()
       else {
         console.error("getAccount ERROR: no result")
-        respond(res, statusCodes.user_unknown)
       }
       return
     }
     if(callback) callback(result[0])
-    else respond(res, statusCodes.server_error)
   })
 }
 
@@ -237,7 +251,6 @@ function getSession(row, check, callback, onerr) {
       if(onerr) onerr(e)
       else {
         console.error("getSession Error:", e)
-        respond(res, statusCodes.server_error)
       }
       return
     }
@@ -245,12 +258,10 @@ function getSession(row, check, callback, onerr) {
       if(onerr) onerr()
       else {
         console.error("getSession ERROR: no result")
-        respond(res, statusCodes.no_session)
       }
       return
     }
     if(callback) callback(result[0])
-    else respond(res, statusCodes.server_error)
   })
 }
 
@@ -260,12 +271,23 @@ function getSessions(row, check, callback, onerr) {
       if(onerr) onerr(e)
       else {
         console.error("getSession Error:", e)
-        respond(res, statusCodes.server_error)
       }
       return
     }
     if(callback) callback(result)
-    else respond(res, statusCodes.server_error)
+  })
+}
+
+function deleteSessions(row, check, callback, onerr) {
+  app.query(`DELETE * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+    if(e) {
+      if(onerr) onerr(e)
+      else {
+        console.error("deleteSessions Error:", e)
+      }
+      return
+    }
+    if(callback) callback(result)
   })
 }
 
