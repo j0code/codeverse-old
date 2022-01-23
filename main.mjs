@@ -15,7 +15,9 @@ const statusCodes = {
   server_error: { httpCode: 500, status: { code: "server_error", description: "General error" }},
   no_session: { httpCode: 401, status: { code: "no_session", description: "No session" }},
   session_expired: { httpCode: 401, status: { code: "session_expired", description: "Session expired, or unknown" }},
-  wrong_syntax: { httpCode: 401, status: { code: "wrong_syntax", description: "Wrong syntax, e.g. required value missing" }}
+  wrong_syntax: { httpCode: 500, status: { code: "wrong_syntax", description: "Wrong syntax, e.g. required value missing" }},
+  wrong_password: { httpCode: 500, status: { code: "wrong_password", description: "Wrong password" }},
+  passwords_match: { httpCode: 500, status: { code: "passwords_match", description: "Current and new passwords must not match" }}
 }
 
 const sql_options = {
@@ -65,6 +67,34 @@ app.node("register", (req, data, res) => {
     respond(res, statusCodes.invalid, {details: check}) // temp
     console.log("inv")
   }
+})
+
+app.node("account", (req, data, res) => {
+  auth(req, res, session => {
+    getAccount("id", session.id, acc => {
+      respond(res, statusCodes.success, {username: acc.username, email: acc.email, creation: acc.creation, birthdate: acc.birthdate})
+    })
+  })
+})
+
+app.node("account/changepw", (req, data, res) => {
+  auth(req, res, session => {
+    if(!data.current_password || !data.new_password) return respond(res, statusCodes.wrong_syntax)
+    if(data.current_password == data.new_password) return respond(res, statusCodes.passwords_match)
+    getAccount("id", session.id, acc => {
+      var pw_hash = hash256(data.current_password)
+      if(pw_hash != acc.password) return respond(res, statusCodes.wrong_password)
+      pw_hash = hash256(data.new_password)
+      app.query(`UPDATE accounts SET password = '${pw_hash}' WHERE id = '${session.id}'`, (e, result, fields) => {
+        if(e) {
+          respond(res, statusCodes.server_error)
+          throw e
+        }
+        respond(res, statusCodes.success)
+        deleteSessions(id, acc.id)
+      })
+    })
+  })
 })
 
 app.node("profile", (req, data, res) => {
@@ -157,6 +187,8 @@ app.get("/", (req, res) => {
 
 app.get("/login", (req, res) => sendComposedFile(res, "/login"))
 app.get("/register", (req, res) => sendComposedFile(res, "/register"))
+app.get("/account", (req, res) => sendComposedFile(res, "/account"))
+app.get("/account/changepw", (req, res) => sendComposedFile(res, "/account/changepw"))
 app.get("/profile*", (req, res) => sendComposedFile(res, "/profile"))
 app.get("/sessions", (req, res) => sendComposedFile(res, "/sessions"))
 
