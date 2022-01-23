@@ -1,6 +1,7 @@
 import WebApp from "../webapp/main.mjs" // @j0code/webapp
 import crypto from "crypto"
 import UAParser from "ua-parser-js"
+import fs from "fs/promises"
 
 const port = 25560
 const host = `cohalejoja.selfhost.eu:${port}`
@@ -146,17 +147,25 @@ app.node("logout", (req, data, res) => {
   }) // delete session
 })
 
-app.get(["/js/*", "/api.mjs", "/cookie.mjs", "/favicon.ico"], (req, res) => {
-  res.type("application/javascript")
-  sendFile("." + req.url, res)
+app.get(["/js/*","/api.mjs","/cookie.mjs","/favicon.ico"], (req, res) => {
+  sendFile(req.url, res)
 })
 
+app.get("/", (req, res) => {
+  sendFile("/index.html", res)
+})
+
+app.get("/login", (req, res) => sendComposedFile(res, "/login"))
+app.get("/register", (req, res) => sendComposedFile(res, "/register"))
+app.get("/profile*", (req, res) => sendComposedFile(res, "/profile"))
+app.get("/sessions", (req, res) => sendComposedFile(res, "/sessions"))
+
 app.get("*", (req, res) => {
-  sendFile("./index.html", res)
+  res.redirect("/")
 })
 
 function sendFile(path, res, headers) {
-  res.sendFile(path, {root: process.cwd() + "/docs/", headers}, e => {
+  res.sendFile("." + path, {root: process.cwd() + "/docs/", headers}, e => {
     if(e) {
       console.error(e)
       if(e.code == "ENOTFOUND") {
@@ -167,6 +176,14 @@ function sendFile(path, res, headers) {
       res.writeHead(500)
       res.end("500 Internal Server Error")
     }
+  })
+}
+
+function sendComposedFile(res, path) {
+  fs.readFile(process.cwd() + "/docs/head.html", {encoding: "utf8"}).then(head => {
+    fs.readFile(process.cwd() + "/docs" + path + "/index.html", {encoding: "utf8"}).then(body => {
+      res.send(`<!doctype html>\n<html>\n<head>\n${head}</head>\n<body>\n${body}</body></html>`)
+    })
   })
 }
 
@@ -279,7 +296,7 @@ function getSessions(row, check, callback, onerr) {
 }
 
 function deleteSessions(row, check, callback, onerr) {
-  app.query(`DELETE * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+  app.query(`DELETE FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
     if(e) {
       if(onerr) onerr(e)
       else {
