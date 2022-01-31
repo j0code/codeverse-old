@@ -36,6 +36,10 @@ var app = new WebApp(port, sql_options, () => {}, (query, e1) => {
     if(e) {console.log(e);return}
     console.log("Table created")
   })
+  query("CREATE TABLE IF NOT EXISTS `profile` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(32) NOT NULL, `bio` VARCHAR(1024) NOT NULL)", (e, result) => {
+    if(e) {console.log(e);return}
+    console.log("Table created")
+  })
 })
 
 app.node("register", (req, data, res) => {
@@ -44,7 +48,6 @@ app.node("register", (req, data, res) => {
     // valid -> create acc
     app.query(`SELECT * FROM accounts WHERE username = "${data.username}"`, (err, result, fields) => {
       if(err) throw err
-      console.log(result) // debug log
       if(result.length == 0) {
         // hash password
         var pw_hash = hash256(data.password)
@@ -54,7 +57,6 @@ app.node("register", (req, data, res) => {
         // put on db
         app.query(`INSERT INTO \`accounts\` (\`username\`, \`password\`, \`email\`, \`birthdate\`) VALUES ("${data.username}", "${pw_hash}", "${data.email}", "${sqldate}")`, (err, result) => {
           if(err) throw err
-          console.log(result) // debug log
           console.log("Created account!") // debug log
           getAccount("username", data.username, acc => {
             createSession(acc, req, res)
@@ -103,23 +105,22 @@ app.node("account/changepw", (req, data, res) => {
 
 app.node("profile", (req, data, res) => {
   auth(req, res, session => {
-    if(data.username) { // get other user's profile
-      getAccount("username", data.username, acc => {
-        var o = {username: acc.username, creation: acc.creation}
-        if(acc.id == session.id) { // account is self
-          o.email = acc.email
-          o.birthdate = acc.birthdate
-        }
+    getAccount(data.username ? "username" : "id", data.username ? data.username : session.id, acc => {
+      var o = {username: acc.username, creation: acc.creation}
+      getProfile("id", acc.id, profile => {
+        o.name = profile.name
+        o.bio = profile.bio
         respond(res, statusCodes.success, o)
       }, e => {
-        if(e) throw e
-        respond(res, statusCodes.user_unknown)
+        if(e && e != "no_result") console.error("profile Error:", e)
+        o.name = ""
+        o.bio = ""
+        respond(res, statusCodes.success, o)
       })
-    } else { // get own profile
-      getAccount("id", session.id, acc => {
-        respond(res, statusCodes.success, {username: acc.username, email: acc.email, creation: acc.creation, birthdate: acc.birthdate})
-      })
-    }
+    }, e => {
+      if(e) console.error("profile Error:", e)
+      respond(res, statusCodes.user_unknown)
+    })
   })
 })
 
@@ -161,7 +162,7 @@ app.node("logout", (req, data, res) => {
   }) // delete session
 })
 
-app.get(["/js/*","/api.mjs","/cookie.mjs","/favicon.ico"], (req, res) => {
+app.get(["/js/*","/css/*","/api.mjs","/cookie.mjs","/favicon.ico"], (req, res) => {
   sendFile(req.url, res)
 })
 
@@ -231,7 +232,6 @@ function auth(req, res, callback, onerr) {
   // find session
   app.query(`SELECT * FROM sessions WHERE token = "${cookies.session}"`, (e, result, fields) => {
     if(e) throw e
-    console.log(result)
     if(result.length == 0) {
       res.setHeader("Location", base_url + "/login")
       respond(res, statusCodes.no_session)
@@ -269,9 +269,29 @@ function getAccount(row, check, callback, onerr) {
       return
     }
     if(result.length == 0) {
-      if(onerr) onerr()
+      if(onerr) onerr("no_result")
       else {
         console.error("getAccount ERROR: no result")
+      }
+      return
+    }
+    if(callback) callback(result[0])
+  })
+}
+
+function getProfile(row, check, callback, onerr) {
+  app.query(`SELECT * FROM profile WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+    if(e) {
+      if(onerr) onerr(e)
+      else {
+        console.error("getProfile Error:", e)
+      }
+      return
+    }
+    if(result.length == 0) {
+      if(onerr) onerr("no_result")
+      else {
+        console.error("getProfile ERROR: no result")
       }
       return
     }
@@ -333,14 +353,12 @@ function createSession(acc, req, res) {
   // check exists
   app.query(`SELECT * FROM sessions WHERE token = "${token}"`, (e, result, fields) => {
     if(e) throw e
-    console.log(result)
     if(result.length != 0) return respond(res, statusCodes.server_error, "Generated session token already exists. Please try again.")
     // insert session into table
     var date = new Date(Date.now() + (1000*60*60*24)) // expires in 1 day
     var sqldate = date.toISOString().slice(0, -1).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
     app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify({raw: req.get("user-agent"), parsed: uagent}).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
       if(e) throw e
-      console.log(result) // debug log
       console.log("Created session!") // debug log
       res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
       respond(res, statusCodes.success, "")
