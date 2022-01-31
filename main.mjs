@@ -200,6 +200,7 @@ function sendComposedFile(res, path) {
   fs.readFile(process.cwd() + "/docs/head.html", {encoding: "utf8"}).then(head => {
     fs.readFile(process.cwd() + "/docs" + path + "/index.html", {encoding: "utf8"}).then(body => {
       res.set("Cache-Control", "no-cache")
+      res.set("X-Content-Type-Options", "nosniff")
       res.send(`${head}\n<body>\n${body}</body></html>`)
     })
   })
