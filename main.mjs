@@ -167,7 +167,7 @@ app.get(["/js/*","/css/*","/api.mjs","/cookie.mjs","/favicon.ico"], (req, res) =
 })
 
 app.get("/", (req, res) => {
-  sendFile("/index.html", res)
+  sendFile("/index.html", res, {"X-Content-Type-Options": "nosniff"})
 })
 
 app.get("/login", (req, res) => sendComposedFile(res, "/login"))
@@ -218,7 +218,7 @@ function respond(res, status, data) {
   var o = { status: status.status, data }
   res.writeHead(status.httpCode)
   res.end(JSON.stringify(o))
-  console.log("o", o)
+  //console.log("o", o)
 }
 
 function auth(req, res, callback, onerr) {
