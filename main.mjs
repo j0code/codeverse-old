@@ -34,11 +34,11 @@ var app = new WebApp(port, sql_options, () => {}, (query, e1) => {
   })
   query("CREATE TABLE IF NOT EXISTS `sessions` (`sessionid` INT AUTO_INCREMENT PRIMARY KEY, `id` INT, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `expires` DATETIME NOT NULL, `address` VARCHAR(39) NOT NULL, `agent` JSON NOT NULL, `token` VARCHAR(256) NOT NULL)", (e, result) => {
     if(e) {console.log(e);return}
-    console.log("Table created")
+    console.log("sessions table created")
   })
-  query("CREATE TABLE IF NOT EXISTS `profile` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(32) NOT NULL, `bio` VARCHAR(1024) NOT NULL)", (e, result) => {
+  query("CREATE TABLE IF NOT EXISTS `profile` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(32) NOT NULL, `bio` VARCHAR(1024) NOT NULL, `sex` ENUM(\"m\", \"w\", \"d\"), `pronouns` ENUM(\"any\", \"male\", \"female\", \"neutral\", \"animate\", \"inanimate\"), `color` BINARY(3))", (e, result) => {
     if(e) {console.log(e);return}
-    console.log("Table created")
+    console.log("profile table created")
   })
 })
 
@@ -106,15 +106,21 @@ app.node("account/changepw", (req, data, res) => {
 app.node("profile", (req, data, res) => {
   auth(req, res, session => {
     getAccount(data.username ? "username" : "id", data.username ? data.username : session.id, acc => {
-      var o = {username: acc.username, creation: acc.creation}
+      var o = {id: acc.id, username: acc.username, creation: acc.creation}
       getProfile("id", acc.id, profile => {
         o.name = profile.name
         o.bio = profile.bio
+        o.sex = profile.sex || null
+        o.pronouns = profile.pronouns || null
+        o.color = profile.color || null
         respond(res, statusCodes.success, o)
       }, e => {
         if(e && e != "no_result") console.error("profile Error:", e)
         o.name = ""
         o.bio = ""
+        o.sex = null
+        o.pronouns = null
+        o.color = null
         respond(res, statusCodes.success, o)
       })
     }, e => {
