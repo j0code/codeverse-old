@@ -112,7 +112,8 @@ app.node("profile", (req, data, res) => {
         o.bio = profile.bio
         o.sex = profile.sex || null
         o.pronouns = profile.pronouns || null
-        o.color = profile.color || null
+        o.color = null
+        if(profile.color_hex) o.color = "#" + profile.color_hex
         respond(res, statusCodes.success, o)
       }, e => {
         if(e && e != "no_result") console.error("profile Error:", e)
@@ -287,7 +288,7 @@ function getAccount(row, check, callback, onerr) {
 }
 
 function getProfile(row, check, callback, onerr) {
-  app.query(`SELECT * FROM profile WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
+  app.query(`SELECT *, hex(color) AS color_hex FROM profile WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
     if(e) {
       if(onerr) onerr(e)
       else {
