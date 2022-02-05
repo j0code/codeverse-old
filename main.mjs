@@ -279,11 +279,13 @@ function auth(req, res, callback, onerr) {
     }
     var session = result[0]
     // match session
-    var raw_agent = JSON.parse(session.agent).raw
+    var raw_agent = JSON.parse(session.agent).ua
     if(session.address != req.ip || raw_agent != req.get("user-agent")) {
-      respond(res, statusCodes.no_session)
       if(onerr) onerr("session_mismatch")
-      else console.error("auth ERROR: no_session (session_mismatch)")
+      else {
+        respond(res, statusCodes.no_session)
+        console.error("auth ERROR: no_session (session_mismatch)")
+      }
       return
     }
     if(session.expires.getTime() < Date.now()) { // session expired
@@ -399,7 +401,7 @@ function createSession(acc, req, res) {
     // insert session into table
     var date = new Date(Date.now() + (1000*60*60*24)) // expires in 1 day
     var sqldate = date.toISOString().slice(0, -1).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
-    app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify({raw: req.get("user-agent"), parsed: uagent}).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
+    app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify(uagent).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
       if(e) throw e
       console.log("Created session!") // debug log
       res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
