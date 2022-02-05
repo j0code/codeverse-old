@@ -36,7 +36,7 @@ var app = new WebApp(port, sql_options, () => {}, (query, e1) => {
     if(e) {console.log(e);return}
     console.log("sessions table created")
   })
-  query("CREATE TABLE IF NOT EXISTS `profile` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(32) NOT NULL, `bio` VARCHAR(1024) NOT NULL, `sex` ENUM(\"m\", \"w\", \"d\"), `pronouns` ENUM(\"any\", \"male\", \"female\", \"neutral\", \"animate\", \"inanimate\"), `color` BINARY(3))", (e, result) => {
+  query("CREATE TABLE IF NOT EXISTS `profile` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(32) NOT NULL, `bio` VARCHAR(1024) NOT NULL, `sex` ENUM(\"m\", \"f\", \"d\"), `pronouns` ENUM(\"any\", \"male\", \"female\", \"neutral\", \"animate\", \"inanimate\"), `color` BINARY(3))", (e, result) => {
     if(e) {console.log(e);return}
     console.log("profile table created")
   })
@@ -131,6 +131,34 @@ app.node("profile", (req, data, res) => {
   })
 })
 
+app.node("profile/edit", (req, data, res) => {
+  auth(req, res, session => {
+    var sex = data.sex || null
+    var pronouns = data.pronouns || null
+    var color = data.color || null
+    if(sex) sex = `"${sex}"`
+    if(pronouns) pronouns = `"${pronouns}"`
+    if(color) {
+      if(color.startsWith("#")) color = color.substr(1)
+      color = `unhex("${color}")`
+    }
+    getProfile("id", session.id, profile => { // profile exists -> update
+      app.query(`UPDATE \`profile\` SET name="${data.name || ""}", bio="${data.bio || ""}", sex=${sex}, pronouns=${pronouns}, color=${color} WHERE id=${session.id}`, (err, result) => {
+        if(err) throw err
+        console.log("Updated profile!", result) // debug log
+        respond(res, statusCodes.success)
+      })
+    }, e => { // profile does not exist -> create
+      if(e != "no_result") console.error("profile/edit Error:", e)
+      app.query(`INSERT INTO \`profile\` (\`id\`, \`name\`, \`bio\`, \`sex\`, \`pronouns\`, \`color\`) VALUES ("${session.id}", "${data.name || ""}", "${data.bio || ""}", ${sex}, ${pronouns}, ${color})`, (err, result) => {
+        if(err) throw err
+        console.log("Created profile!", result) // debug log
+        respond(res, statusCodes.success)
+      })
+    })
+  })
+})
+
 app.node("sessions", (req, data, res) => {
   auth(req, res, session => {
     getSessions("id", session.id, sessions => {
@@ -177,12 +205,12 @@ app.get("/", (req, res) => {
   sendFile("/index.html", res, {"X-Content-Type-Options": "nosniff"})
 })
 
-app.get("/login", (req, res) => sendComposedFile(res, "/login"))
-app.get("/register", (req, res) => sendComposedFile(res, "/register"))
-app.get("/account", (req, res) => sendComposedFile(res, "/account"))
-app.get("/account/changepw", (req, res) => sendComposedFile(res, "/account/changepw"))
-app.get("/profile*", (req, res) => sendComposedFile(res, "/profile"))
-app.get("/sessions", (req, res) => sendComposedFile(res, "/sessions"))
+app.get("/login", (req, res) => sendComposedFile(req, res, "/login"))
+app.get("/register", (req, res) => sendComposedFile(req, res, "/register"))
+app.get("/account", (req, res) => sendComposedFile(req, res, "/account"))
+app.get("/account/changepw", (req, res) => sendComposedFile(req, res, "/account/changepw"))
+app.get("/profile*", (req, res) => sendComposedFile(req, res, "/profile"))
+app.get("/sessions", (req, res) => sendComposedFile(req, res, "/sessions"))
 
 app.get("*", (req, res) => {
   res.redirect("/")
@@ -203,12 +231,14 @@ function sendFile(path, res, headers) {
   })
 }
 
-function sendComposedFile(res, path) {
+function sendComposedFile(req, res, path) {
+  console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url}`)
   fs.readFile(process.cwd() + "/docs/head.html", {encoding: "utf8"}).then(head => {
     fs.readFile(process.cwd() + "/docs" + path + "/index.html", {encoding: "utf8"}).then(body => {
       res.set("Cache-Control", "no-cache")
       res.set("X-Content-Type-Options", "nosniff")
       res.send(`${head}\n<body>\n${body}</body></html>`)
+      console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url} -> 200 OK`)
     })
   })
 }
@@ -305,6 +335,10 @@ function getProfile(row, check, callback, onerr) {
     }
     if(callback) callback(result[0])
   })
+}
+
+function createProfile() {
+
 }
 
 function getSession(row, check, callback, onerr) {
