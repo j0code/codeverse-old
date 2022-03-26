@@ -1,0 +1,14 @@
+{
+	"port": 25560,
+	"https": {
+		"key": "./cert/privkey.pem",
+	  "cert": "./cert/fullchain.pem"
+	},
+	"sql": {
+	  "host": "localhost",
+	  "user": "root",
+	  "password": "i.Cc:NLsJ92MByk",
+	  "database": "codeverse"
+	},
+	"url": "https://cohalejoja.selfhost.eu"
+}
