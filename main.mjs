@@ -1,7 +1,11 @@
-import WebApp from "../webapp/main.mjs" // @j0code/webapp
-import crypto from "crypto"
-import UAParser from "ua-parser-js"
+import https from "https"
+import express from "express"
 import fs from "fs/promises"
+import * as iolib from "socket.io"
+import config from "./config-loader.mjs"
+import sql from "./sql.mjs"
+import { auth, adminauth, getAccount, getProfile, getSession, getSessions, deleteSessions, createSession } from "./sql.mjs"
+import APIClient from "./apiclient.mjs"
 
 const port = 25560
 const host = `cohalejoja.selfhost.eu:${port}`
@@ -20,29 +24,22 @@ const statusCodes = {
   passwords_match: { httpCode: 500, status: { code: "passwords_match", description: "Current and new passwords must not match" }}
 }
 
-const sql_options = {
-  host: "localhost",
-  user: "root",
-  password: "i.Cc:NLsJ92MByk",
-  database: "codeverse"
-}
-
-var app = new WebApp(port, sql_options, () => {}, (query, e1) => {
-  query("CREATE TABLE IF NOT EXISTS `accounts` (`id` INT AUTO_INCREMENT PRIMARY KEY, `username` VARCHAR(16) UNIQUE NOT NULL, `password` VARCHAR(256) NOT NULL, `email` VARCHAR(32) NOT NULL, `birthdate` DATETIME NOT NULL, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `verified` BOOLEAN DEFAULT FALSE, `emailverified` BOOLEAN DEFAULT FALSE)", (e, result) => {
-    if(e) {console.log(e);return}
-    console.log("accounts table created")
-  })
-  query("CREATE TABLE IF NOT EXISTS `sessions` (`sessionid` INT AUTO_INCREMENT PRIMARY KEY, `id` INT, `creation` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, `expires` DATETIME NOT NULL, `address` VARCHAR(39) NOT NULL, `agent` JSON NOT NULL, `token` VARCHAR(256) NOT NULL)", (e, result) => {
-    if(e) {console.log(e);return}
-    console.log("sessions table created")
-  })
-  query("CREATE TABLE IF NOT EXISTS `profile` (`id` INT AUTO_INCREMENT PRIMARY KEY, `name` VARCHAR(32) NOT NULL, `bio` VARCHAR(1024) NOT NULL, `sex` ENUM(\"m\", \"f\", \"d\"), `pronouns` ENUM(\"any\", \"male\", \"female\", \"neutral\", \"animate\", \"inanimate\"), `color` BINARY(3))", (e, result) => {
-    if(e) {console.log(e);return}
-    console.log("profile table created")
-  })
+const app = express()
+const httpsServer = https.createServer(config.https, app)
+export const io = new iolib.Server(httpsServer, {
+	cors: {
+		origin: "https://j0code.ddns.net",
+		methods: ["GET", "POST"]
+	}
 })
 
-app.node("register", (req, data, res) => {
+httpsServer.listen(config.port, () => { console.log(`Server is running on ${config.port}`) }) // debug log
+
+io.on("connection", socket => new APIClient(io, socket))
+
+io.on("error", console.error)
+
+/*app.node("register", (req, data, res) => {
   var check = checkRegister(data)
   if(!check) {
     // valid -> create acc
@@ -195,7 +192,7 @@ app.node("logout", (req, data, res) => {
   deleteSessions("token", cookies.session, () => {}, e => {
     if(e) console.error("logout Error: ", e)
   }) // delete session
-})
+})*/
 
 app.get(["/js/*","/css/*","/api.mjs","/cookie.mjs","/favicon.ico"], (req, res) => {
   sendFile(req.url, res)
@@ -211,6 +208,31 @@ app.get("/account", (req, res) => sendComposedFile(req, res, "/account"))
 app.get("/account/changepw", (req, res) => sendComposedFile(req, res, "/account/changepw"))
 app.get("/profile*", (req, res) => sendComposedFile(req, res, "/profile"))
 app.get("/sessions", (req, res) => sendComposedFile(req, res, "/sessions"))
+
+// replacement for phpMyAdmin
+app.get("/admin", (req, res) => {
+  console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url}`)
+  adminauth(req, res, session => {
+    console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url} -> 200 OK (Admin Identified)`)
+    sendFile("/admin/index.html", res, {"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
+  }, e => {
+    if(typeof e == "string") console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url} -> 401 Unauthorized`)
+    else console.error("GET /admin* Error:", e)
+    res.redirect("/login")
+  })
+})
+
+app.get("/admin/*", (req, res) => {
+  console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url}`)
+  adminauth(req, res, session => {
+    console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url} -> 200 OK (Admin Identified)`)
+    sendFile(req.url, res, {"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"})
+  }, e => {
+    if(typeof e == "string") console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url} -> 401 Unauthorized`)
+    else console.error("GET /admin/* Error:", e)
+    res.redirect("/login")
+  })
+})
 
 app.get("*", (req, res) => {
   res.redirect("/")
@@ -258,158 +280,6 @@ function respond(res, status, data) {
   //console.log("o", o)
 }
 
-function auth(req, res, callback, onerr) {
-  // check session cookie
-  if(req.get("cookie")) var cookies = parseCookie(req.get("cookie"))
-  if(!req.get("cookie") || !cookies.session) {
-    respond(res, statusCodes.no_session)
-    if(onerr) onerr("no_token")
-    else console.error("auth ERROR: no_session (no_token)")
-    return
-  }
-  // find session
-  app.query(`SELECT * FROM sessions WHERE token = "${cookies.session}"`, (e, result, fields) => {
-    if(e) throw e
-    if(result.length == 0) {
-      res.setHeader("Location", base_url + "/login")
-      respond(res, statusCodes.no_session)
-      if(onerr) onerr("unknown_session")
-      else console.error("auth ERROR: no_session (unknown_session)")
-      return
-    }
-    var session = result[0]
-    // match session
-    var raw_agent = JSON.parse(session.agent).ua
-    if(session.address != req.ip || raw_agent != req.get("user-agent")) {
-      if(onerr) onerr("session_mismatch")
-      else {
-        respond(res, statusCodes.no_session)
-        console.error("auth ERROR: no_session (session_mismatch)")
-      }
-      return
-    }
-    if(session.expires.getTime() < Date.now()) { // session expired
-      respond(res, statusCodes.session_expired)
-      deleteSessions("token", cookies.session) // delete session
-      if(onerr) onerr("session_expired")
-      else console.error("auth ERROR: no_session (session_expired)")
-      return
-    }
-    if(callback) callback(result[0])
-  })
-}
-
-function getAccount(row, check, callback, onerr) {
-  app.query(`SELECT * FROM accounts WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
-    if(e) {
-      if(onerr) onerr(e)
-      else {
-        console.error("getAccount Error:", e)
-      }
-      return
-    }
-    if(result.length == 0) {
-      if(onerr) onerr("no_result")
-      else {
-        console.error("getAccount ERROR: no result")
-      }
-      return
-    }
-    if(callback) callback(result[0])
-  })
-}
-
-function getProfile(row, check, callback, onerr) {
-  app.query(`SELECT *, hex(color) AS color_hex FROM profile WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
-    if(e) {
-      if(onerr) onerr(e)
-      else {
-        console.error("getProfile Error:", e)
-      }
-      return
-    }
-    if(result.length == 0) {
-      if(onerr) onerr("no_result")
-      else {
-        console.error("getProfile ERROR: no result")
-      }
-      return
-    }
-    if(callback) callback(result[0])
-  })
-}
-
-function createProfile() {
-
-}
-
-function getSession(row, check, callback, onerr) {
-  app.query(`SELECT * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
-    if(e) {
-      if(onerr) onerr(e)
-      else {
-        console.error("getSession Error:", e)
-      }
-      return
-    }
-    if(result.length == 0) {
-      if(onerr) onerr("no_result")
-      else {
-        console.error("getSession ERROR: no result")
-      }
-      return
-    }
-    if(callback) callback(result[0])
-  })
-}
-
-function getSessions(row, check, callback, onerr) {
-  app.query(`SELECT * FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
-    if(e) {
-      if(onerr) onerr(e)
-      else {
-        console.error("getSession Error:", e)
-      }
-      return
-    }
-    if(callback) callback(result)
-  })
-}
-
-function deleteSessions(row, check, callback, onerr) {
-  app.query(`DELETE FROM sessions WHERE \`${row}\` = "${check}"`, (e, result, fields) => {
-    if(e) {
-      if(onerr) onerr(e)
-      else {
-        console.error("deleteSessions Error:", e)
-      }
-      return
-    }
-    if(callback) callback(result)
-  })
-}
-
-function createSession(acc, req, res) {
-  // create session
-  var uagent = UAParser(req.get("user-agent"))
-  console.log(`User Agent: ${uagent.browser.name}/${uagent.browser.major} on ${uagent.os.name}`)
-  var token = hash256(Math.random()+"") // random hash
-  // check exists
-  app.query(`SELECT * FROM sessions WHERE token = "${token}"`, (e, result, fields) => {
-    if(e) throw e
-    if(result.length != 0) return respond(res, statusCodes.server_error, "Generated session token already exists. Please try again.")
-    // insert session into table
-    var date = new Date(Date.now() + (1000*60*60*24)) // expires in 1 day
-    var sqldate = date.toISOString().slice(0, -1).replace('T', ' ') // convert into YYYY-MM-DD hh:mm:ss format
-    app.query(`INSERT INTO \`sessions\` (\`id\`, \`expires\`, \`address\`, \`agent\`, \`token\`) VALUES ("${acc.id}", "${sqldate}", "${req.ip}", "${JSON.stringify(uagent).replaceAll("\"", "\\\"")}", "${token}")`, (e, result) => {
-      if(e) throw e
-      console.log("Created session!") // debug log
-      res.cookie("session", token, {path: "/", httpOnly: true, secure: true})
-      respond(res, statusCodes.success, "")
-    })
-  })
-}
-
 function checkRegister(data) {
   if(data.password && data.username && data.email && data.birthdate) {
 		if(data.username.length >= 3) {
@@ -435,21 +305,4 @@ function checkRegister(data) {
 			} else return "Passwort too short (min: 8)";
 		} else return "Username too short (min: 3)";
 	} else return "Invalid or incomplete";
-}
-
-function hash256(a) {
-  var hash = crypto.createHash("sha256")
-  hash.update(a)
-  return hash.digest("hex")
-}
-
-function parseCookie(cookie) {
-  var cookies = cookie.split(";")
-  var o = {}
-  for(var i = 0; i < cookies.length; i++) {
-    var kv = cookies[i].split("=")
-    if(kv.length != 2) continue
-    o[kv[0]] = kv[1]
-  }
-  return o
 }
