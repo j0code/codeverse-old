@@ -5,3 +5,4 @@ api
 run.bat
 .git
 .gitattributes
+config.json
