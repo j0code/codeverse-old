@@ -4,8 +4,9 @@ import fs from "fs/promises"
 import * as iolib from "socket.io"
 import config from "./config-loader.mjs"
 import sql from "./sql.mjs"
-import { auth, adminauth, getAccount, getProfile, getSession, getSessions, deleteSessions, createSession } from "./sql.mjs"
+import { legacy_auth as auth, adminauth, getAccount, getProfile, getSession, getSessions, deleteSessions, createSession } from "./sql.mjs"
 import APIClient from "./apiclient.mjs"
+import { parseCookie, hash256, respond } from "./util.mjs"
 
 const port = 25560
 const host = `cohalejoja.selfhost.eu:${port}`
@@ -180,9 +181,34 @@ app.node("login", (req, data, res) => {
     if(e == "no_result") respond(res, statusCodes.user_unknown)
     else console.error("login Error:", e)
   })
+})*/
+
+// temp
+app.post("/api/login", (req, res) => {
+	let data = []
+  req.on("data", chunk => data.push(chunk)) // construct body
+  req.on("end", () => {
+    data = Buffer.concat(data).toString()
+    try {
+      data = JSON.parse(data)
+    } catch(err) {}
+    console.log("data:", data)
+    res.setHeader("Content-Type", "application/json")
+		if(!data.password || !data.username) return respond(res, statusCodes.wrong_syntax)
+	  getAccount("username", data.username, acc => {
+	    // check pw hash
+	    var pw_hash = hash256(data.password)
+	    console.log("HASH " + data.password + " -> " + pw_hash)
+	    if(acc.password != pw_hash) return respond(res, statusCodes.user_unknown)
+	    createSession(acc, req, res)
+	  }, e => {
+	    if(e == "no_result") respond(res, statusCodes.user_unknown)
+	    else console.error("login Error:", e)
+	  })
+  })
 })
 
-app.node("logout", (req, data, res) => {
+/*app.node("logout", (req, data, res) => {
   res.cookie("session", "", {path: "/", httpOnly: true, secure: true, maxAge: 0}) // delete cookie
   res.end() // no response
   // delete session
@@ -263,21 +289,6 @@ function sendComposedFile(req, res, path) {
       console.log(`[${req.socket.remoteAddress}] ${req.method.toUpperCase()} ${req.url} -> 200 OK`)
     })
   })
-}
-
-function respond(res, status, data) {
-  if(!res) return
-  if(data == undefined) data = {}
-  if(!status || typeof data != "object") {
-    res.writeHead(500)
-    res.end(JSON.stringify({status: (status || statusCodes.server_error).status, data: {}}))
-    return
-  }
-  data = data || {}
-  var o = { status: status.status, data }
-  res.writeHead(status.httpCode)
-  res.end(JSON.stringify(o))
-  //console.log("o", o)
 }
 
 function checkRegister(data) {
