@@ -10,5 +10,12 @@
 	  "password": "i.Cc:NLsJ92MByk",
 	  "database": "codeverse"
 	},
-	"url": "https://cohalejoja.selfhost.eu"
+	"url": "https://cohalejoja.selfhost.eu",
+	"apps": [
+		{
+			"name": "testapp",
+			"addr": "localhost",
+			"port": 56966
+		}
+	]
 }

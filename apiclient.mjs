@@ -10,14 +10,18 @@ export default class APIClient {
 		this.#socket = socket
 		var ip = socket.request.connection.remoteAddress
 		var token = socket.handshake.auth.token
+		var uagent = socket.request.headers["user-agent"]
 
 		logEvent(ip, "IO", "connect")
 		console.log("token:", token)
 
-		if(token != "thisisnotatokenbutstill") { // temporary
+		auth(token, ip, uagent).then(session => {
+			socket.emit("auth")
+		}).catch(e => {
+			// unauthenticated or error
+			console.log("apiclient auth error:", e)
 			socket.disconnect(true)
-			return
-		}
+		})
 
 		socket.on("disconnect", () => {
 			// c'mon, do something
